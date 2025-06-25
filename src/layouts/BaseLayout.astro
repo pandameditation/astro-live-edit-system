@@ -1,0 +1,16 @@
+---
+import SourceMap from "../components/SourceMap.astro";
+const isDev = import.meta.env.DEV;
+---
+
+<html>
+    <head>
+        <title>Live Edit Test</title>
+        <meta charset="utf-8" />
+    </head>
+    <body>
+        <h1>THIS IS FROM THE LAYOUT</h1>
+        <slot />
+        {isDev && <SourceMap />}
+    </body>
+</html>

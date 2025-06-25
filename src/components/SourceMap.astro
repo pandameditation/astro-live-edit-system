@@ -1,0 +1,22 @@
+---
+import { cwd } from "node:process";
+const isDev = import.meta.env.DEV;
+---
+
+{isDev && <script is:inline src="/live-edit.js" />}
+
+<script is:inline type="module" define:vars={{ cwd: cwd() }}>
+    for (const element of document.querySelectorAll(
+        "[data-astro-source-file]",
+    )) {
+        element.setAttribute(
+            "data-source-file",
+            element.getAttribute("data-astro-source-file"),
+            // .replace(`${cwd}/`, ""),
+        );
+        element.setAttribute(
+            "data-source-loc",
+            element.getAttribute("data-astro-source-loc"),
+        );
+    }
+</script>

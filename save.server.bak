@@ -1,0 +1,52 @@
+// Working version with .astro, but do not work with .md
+
+import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import cors from 'cors';
+
+const app = express();
+app.use(express.json());
+app.use(cors());
+
+app.post('/save', (req, res) => {
+  const edits = req.body;
+  if (!Array.isArray(edits)) {
+    return res.status(400).send('Invalid data');
+  }
+
+  const changesByFile = {};
+
+  for (const { file, loc, content } of edits) {
+    const relPath = file.replace(process.cwd() + '/', '');
+    if (!changesByFile[relPath]) changesByFile[relPath] = [];
+    changesByFile[relPath].push({ loc, content });
+  }
+
+  try {
+    for (const [file, changes] of Object.entries(changesByFile)) {
+      const fullPath = path.resolve(file);
+      let lines = fs.readFileSync(fullPath, 'utf-8').split('\n');
+
+      for (const { loc, content } of changes) {
+        const [lineStr, colStr] = loc.split(':');
+        const line = parseInt(lineStr) - 1;
+
+        if (line >= 0 && line < lines.length) {
+          lines[line] = lines[line].replace(/>([^<]*)</, `>${content}<`);
+        }
+      }
+
+      fs.writeFileSync(fullPath, lines.join('\n'), 'utf-8');
+    }
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Failed to save');
+  }
+});
+
+app.listen(3000, () => {
+  console.log('Edit server running at http://localhost:3000');
+});
