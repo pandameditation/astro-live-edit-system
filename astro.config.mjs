@@ -20,12 +20,11 @@ function remarkAddSourcePathAndLine() {
         if (!node.data) node.data = {};
         if (!node.data.hProperties) node.data.hProperties = {};
 
-        node.data.hProperties['data-source-path'] = filename;
+        node.data.hProperties['data-source-file'] = filename;
 
         // Add line number if available
         if (node.position?.start?.line) {
           node.data.hProperties['data-source-loc'] = node.position.start.line + ":" + node.position.start.column;
-          console.log(node.position)
         }
       }
     });

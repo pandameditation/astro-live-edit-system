@@ -7,7 +7,9 @@ document.addEventListener('DOMContentLoaded', () => {
     el.addEventListener('blur', () => {
       const file = el.getAttribute('data-source-file');
       const loc = el.getAttribute('data-source-loc');
+      //const content = getCleanedMarkdownFromElement(el.innerText);
       const content = el.innerText;
+
       if (file && loc && content) {
         changes.push({ file, loc, content });
       }
@@ -39,9 +41,25 @@ document.addEventListener('DOMContentLoaded', () => {
     if (response.ok) {
       alert('Changes saved!');
     } else {
-      alert('Save failed');
+      alert(`Save failed: ${response.status} ${response.statusText}`);
+      console.log(changes)
     }
   });
 
   document.body.appendChild(saveBtn);
 });
+
+function getCleanedMarkdownFromElement(el) {
+  let html = el.innerHTML;
+
+  // Normalize HTML to Markdown-style text
+  html = html
+    .replace(/<div>(.*?)<\/div>/gis, '\n\n$1')
+    .replace(/<br\s*\/?>/gi, '\n\n')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\u00A0/g, ' ')
+    .replace(/<\/?p[^>]*>/gi, '')
+    .trim();
+
+  return html;
+}

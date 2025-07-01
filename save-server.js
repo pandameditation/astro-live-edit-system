@@ -7,94 +7,80 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-function replaceMarkdownNodeByLineColumn(sourceText, line, column, newContent) {
+// Find the tag encompassing the position line, column in the sourceText (.astro files)
+function findTagAtPosition(sourceText, line, column) {
   const lines = sourceText.split('\n');
+  const lineIndex = line - 1;
+  if (lineIndex < 0 || lineIndex >= lines.length) return null;
 
-  // Find start of node (go up until blank line or top)
-  let startLine = line - 1;
-  while (startLine > 0 && lines[startLine].trim() !== '') {
-    startLine--;
-  }
-  if (lines[startLine].trim() === '') startLine++;
+  const lineText = lines[lineIndex];
+  const searchStart = Math.max(0, column - 1);
+  const beforeCursor = lineText.slice(0, searchStart);
 
-  // Find end of node (go down until blank line or bottom)
-  let endLine = line - 1;
-  while (endLine < lines.length && lines[endLine].trim() !== '') {
-    endLine++;
-  }
-  endLine--;
+  // Find last '<' before the column on this line (start of tag)
+  const tagStartCol = beforeCursor.lastIndexOf('<');
+  if (tagStartCol === -1) return null;
 
-  // Replace the lines from startLine to endLine inclusive
-  const before = lines.slice(0, startLine);
-  const after = lines.slice(endLine + 1);
-  const replacementLines = newContent.split('\n');
+  // Calculate offset in entire source text of tag start
+  const globalOffset =
+    lines
+      .slice(0, lineIndex)
+      .reduce((acc, l) => acc + l.length + 1, 0) + // +1 for newline
+    tagStartCol;
 
-  return [...before, ...replacementLines, ...after].join('\n');
+  // Match opening tag
+  const afterStart = sourceText.slice(globalOffset);
+  const openTagMatch = afterStart.match(/^<([a-zA-Z0-9_\-]+)(\s[^>]*)?>/);
+  if (!openTagMatch) return null;
+
+  const tagName = openTagMatch[1];
+  const openTagLength = openTagMatch[0].length;
+  const openTagEndOffset = globalOffset + openTagLength;
+  const closeTag = `</${tagName}>`;
+  const closeTagOffset = sourceText.indexOf(closeTag, openTagEndOffset);
+  if (closeTagOffset === -1) return null;
+
+  return {
+    innerStart: openTagEndOffset,
+    innerEnd: closeTagOffset,
+  };
 }
 
-function replaceAstroNodeByLineColumn(sourceText, line, column, newContent) {
-  const lines = sourceText.split('\n');
-  const totalLines = lines.length;
-
-  // Find start of tag (search backwards from line)
-  let startLine = line - 1;
-  while (startLine >= 0) {
-    if (lines[startLine].includes('<')) {
-      // naive check if this line contains a tag start before or at the column
-      const tagPos = lines[startLine].indexOf('<');
-      if (tagPos <= column - 1) break;
-    }
-    startLine--;
-  }
-  if (startLine < 0) startLine = 0;
-
-  // Guess tag name (simple regex on startLine)
-  const tagMatch = lines[startLine].match(/<([^\s>\/]+)/);
-  if (!tagMatch) {
-    throw new Error('Cannot find opening tag on startLine');
-  }
-  const tagName = tagMatch[1];
-
-  // Find closing tag line by scanning forwards from startLine
-  let endLine = startLine;
-  const closingTag = `</${tagName}>`;
-  let foundClosingTag = false;
-
-  while (endLine < totalLines) {
-    if (lines[endLine].includes(closingTag)) {
-      foundClosingTag = true;
-      break;
-    }
-    endLine++;
-  }
-
-  if (!foundClosingTag) {
-    // Possibly self-closing tag - assume single line node
-    endLine = startLine;
-  }
-
-  // Replace lines from startLine to endLine inclusive
-  const before = lines.slice(0, startLine);
-  const after = lines.slice(endLine + 1);
-  const replacementLines = newContent.split('\n');
-
-  return [...before, ...replacementLines, ...after].join('\n');
+// Replace the content between innerStart and innerEnd in sourceText with newContent
+function replaceInnerContent(sourceText, innerStart, innerEnd, newContent) {
+  return sourceText.slice(0, innerStart) + newContent + sourceText.slice(innerEnd);
 }
 
 app.post('/save', (req, res) => {
   const edits = req.body;
   if (!Array.isArray(edits)) {
-    return res.status(400).send('Invalid data');
+    return res.status(400).send('Invalid data: expected an array');
   }
 
+  // Group edits by file path
   const changesByFile = {};
 
-  // Group changes by file
   for (const { file, loc, content } of edits) {
-    // Normalize file path relative to cwd
+    if (!loc || typeof loc !== 'string') {
+      console.warn(`Skipping edit with invalid loc: ${loc}`);
+      continue;
+    }
+
+    const [lineStr, colStr] = loc.split(':');
+    const line = parseInt(lineStr, 10);
+    const column = parseInt(colStr, 10);
+
+    if (isNaN(line) || isNaN(column)) {
+      console.warn(`Skipping edit with invalid loc format: ${loc}`);
+      continue;
+    }
+
+    // Normalize file path to relative from cwd
     const relPath = file.replace(process.cwd() + path.sep, '');
+
     if (!changesByFile[relPath]) changesByFile[relPath] = [];
-    changesByFile[relPath].push({ loc, content });
+
+    changesByFile[relPath].push({ start: { line, column }, content });
   }
 
   try {
@@ -102,34 +88,88 @@ app.post('/save', (req, res) => {
       const fullPath = path.resolve(file);
       let sourceText = fs.readFileSync(fullPath, 'utf-8');
 
-      for (const { loc, content } of changes) {
-        const [lineStr, colStr = '1'] = loc.split(':');
-        const line = parseInt(lineStr, 10);
-        const column = parseInt(colStr, 10);
+      const isMarkdown = fullPath.endsWith('.md') || fullPath.endsWith('.mdx');
+      const lines = sourceText.split('\n');
 
-        if (file.endsWith('.md') || file.endsWith('.mdx')) {
-          sourceText = replaceMarkdownNodeByLineColumn(sourceText, line, column, content);
-        } else if (file.endsWith('.astro')) {
-          sourceText = replaceAstroNodeByLineColumn(sourceText, line, column, content);
-        } else {
-          // fallback: replace the entire line only
-          const lines = sourceText.split('\n');
-          lines[line - 1] = content;
-          sourceText = lines.join('\n');
-        }
+      if (isMarkdown) {
+        // For Markdown: simple line-based replacement at start.line
+        changes
+          .sort((a, b) => b.start.line - a.start.line)
+          .forEach(({ start, content }) => {
+            const idx = start.line - 1;
+            if (idx >= 0 && idx < lines.length) {
+              const originalLine = lines[idx];
+              const cleaned = cleanHtmlToMarkdown(content);
+              lines[idx] = preserveMarkdownPrefix(originalLine, cleaned);
+            } else {
+              console.warn(`[MD] Invalid line index ${idx} for file ${file}`);
+            }
+          });
+
+        fs.writeFileSync(fullPath, lines.join('\n'), 'utf-8');
+      } else {
+        // For Astro files: find tag by start line/column and replace inner content
+        changes
+          .sort((a, b) => b.start.line - a.start.line)
+          .forEach(({ start, content }) => {
+            const tagRange = findTagAtPosition(sourceText, start.line, start.column);
+            if (!tagRange) {
+              console.warn(`Could not find tag at ${file}:${start.line}:${start.column}`);
+              return;
+            }
+
+            sourceText = replaceInnerContent(sourceText, tagRange.innerStart, tagRange.innerEnd, content);
+          });
+
+        fs.writeFileSync(fullPath, sourceText, 'utf-8');
       }
-
-      fs.writeFileSync(fullPath, sourceText, 'utf-8');
     }
 
     res.sendStatus(200);
   } catch (err) {
-    console.error('Error processing edits:', err);
+    console.error('Error saving file:', err);
     res.status(500).send('Failed to save');
   }
 });
 
-const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`Edit server running at http://localhost:${PORT}`);
+app.listen(3000, () => {
+  console.log('Edit server running at http://localhost:3000');
 });
+
+
+//**** UTILITY FONCTIONS ****
+
+function preserveMarkdownPrefix(originalLine, newContent) {
+  // Regex to capture common Markdown prefixes (headers, lists, blockquotes)
+  const mdPrefixMatch = originalLine.match(/^(\s*(#{1,6}\s|[-*+]\s|>\s))/);
+  if (mdPrefixMatch) {
+    const prefix = mdPrefixMatch[1];
+    return prefix + newContent;
+  }
+  // No markdown prefix found, just replace whole line
+  return newContent;
+}
+
+function cleanHtmlToMarkdown(html) {
+  if (typeof html !== 'string') return html;
+
+  // Decode HTML entities
+  html = html
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+  // Replace <div>...</div> with a newline + inner content
+  html = html.replace(/<div>(.*?)<\/div>/gis, (_, inner) => {
+    return '\n';
+  });
+
+  // Strip any other tags like <p>, <span>, etc.
+  html = html.replace(/<\/?[^>]+>/g, '');
+
+  // Normalize line breaks
+  return html.trim();
+}
