@@ -52,14 +52,14 @@ function findTagAtPosition(sourceText, line, column, expectedTagName) {
   const openTagLength = openTagMatch[0].length;
   const openTagEndOffset = globalOffset + openTagLength;
   const closeTag = `</${tagName}>`;
-  const closeTagOffset = sourceText.indexOf(closeTag, openTagEndOffset);
+  const closeTagOffset = findMatchingCloseTag(sourceText, openTagEndOffset, tagName);
   if (closeTagOffset === -1) return null;
   const returnObject = {
     tagName,
     innerStart: openTagEndOffset,
     innerEnd: closeTagOffset,
   };
-  console.log(tagName);
+  console.log(returnObject);
   return returnObject;
 }
 
@@ -154,8 +154,9 @@ app.listen(3000, () => {
   console.log('Edit server running at http://localhost:3000');
 });
 
-
+//###########################
 //**** UTILITY FONCTIONS ****
+//###########################
 
 function preserveMarkdownPrefix(originalLine, newContent) {
   // Regex to capture common Markdown prefixes (headers, lists, blockquotes)
@@ -190,4 +191,23 @@ function cleanHtmlToMarkdown(html) {
 
   // Normalize line breaks
   return html.trim();
+}
+// Nesting-aware search for matching close tag
+function findMatchingCloseTag(sourceText, startOffset, tagName) {
+  const tagRegex = new RegExp(`<${tagName}\\b[^>]*>|</${tagName}>`, 'gi');
+  tagRegex.lastIndex = startOffset;
+
+  let depth = 1;
+  let match;
+
+  while ((match = tagRegex.exec(sourceText)) !== null) {
+    if (match[0].startsWith('</')) {
+      depth--;
+      if (depth === 0) return match.index;
+    } else {
+      depth++;
+    }
+  }
+
+  return -1; // Not found
 }
