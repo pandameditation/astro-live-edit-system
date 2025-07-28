@@ -181,17 +181,24 @@ function cleanHtmlToMarkdown(html) {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
 
-  // Replace <div>...</div> with a newline + inner content
+  // Replace <div><br></div> or any <div> with only whitespace and <br> inside with a double line break
+  html = html.replace(/<div>\s*(<br\s*\/?>)?\s*<\/div>/gi, '\n\n');
+
+  // Replace <div>some content</div> with \n + content + \n
   html = html.replace(/<div>(.*?)<\/div>/gis, (_, inner) => {
-    return '\n';
+    return '\n' + inner.trim() + '\n';
   });
 
-  // Strip any other tags like <p>, <span>, etc.
+  // Strip all remaining HTML tags (but preserve inner text)
   html = html.replace(/<\/?[^>]+>/g, '');
 
-  // Normalize line breaks
+  // Collapse multiple line breaks to max two
+  html = html.replace(/\n{3,}/g, '\n\n');
+
+  // Final trim
   return html.trim();
 }
+
 // Nesting-aware search for matching close tag
 function findMatchingCloseTag(sourceText, startOffset, tagName) {
   const tagRegex = new RegExp(`<${tagName}\\b[^>]*>|</${tagName}>`, 'gi');

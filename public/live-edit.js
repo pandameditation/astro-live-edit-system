@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
   const lastSavedContent = new WeakMap();
-  const editableTags = 'br, p, ul, div, blockquote, h1, h2, h3, h4, h5, h6';
+  const editableTags = 'br, p, ul, ol, div, blockquote, h1, h2, h3, h4, h5, h6';
   const changes = [];
 
   document.querySelectorAll(editableTags).forEach(el => {
