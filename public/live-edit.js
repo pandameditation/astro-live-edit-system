@@ -1,17 +1,36 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const editableTags = 'p, li, ul, ol, blockquote, a, h1, h2, h3, h4, h5, h6';
+  const lastSavedContent = new WeakMap();
+  const editableTags = 'br, p, ul, div, blockquote, h1, h2, h3, h4, h5, h6';
   const changes = [];
 
   document.querySelectorAll(editableTags).forEach(el => {
     el.contentEditable = true;
+    lastSavedContent.set(el, el.innerText);
+
+
     el.addEventListener('blur', () => {
+      //Check that it has changed since last time
+      const last = lastSavedContent.get(el);
+      if (last === el.innerText) {
+        return;
+      }
+      lastSavedContent.set(el, el.innerText);
+
+      // If there are changes, Save and send them to server
       const file = el.getAttribute('data-source-file');
       const loc = el.getAttribute('data-source-loc');
-      //const content = getCleanedMarkdownFromElement(el.innerText);
-      const content = el.innerText;
+      const tagName = el.tagName.toLowerCase();
 
-      if (file && loc && content) {
-        changes.push({ file, loc, content });
+      const content = cleanPlusBeautifyHTML(el.innerHTML);
+      if (!file || !loc || !content) return;
+
+      const index = changes.findIndex(change => change.file === file && change.loc === loc);
+      if (index !== -1) {
+        // Update existing entry
+        changes[index].content = content;
+      } else {
+        // Add new entry
+        changes.push({ file, loc, tagName, content });
       }
     });
   });
@@ -32,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   saveBtn.addEventListener('click', async () => {
+    console.log('Sending changes:', JSON.stringify(changes, null, 2));
     const response = await fetch('http://localhost:3000/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -49,17 +69,48 @@ document.addEventListener('DOMContentLoaded', () => {
   document.body.appendChild(saveBtn);
 });
 
-function getCleanedMarkdownFromElement(el) {
-  let html = el.innerHTML;
 
-  // Normalize HTML to Markdown-style text
-  html = html
-    .replace(/<div>(.*?)<\/div>/gis, '\n\n$1')
-    .replace(/<br\s*\/?>/gi, '\n\n')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\u00A0/g, ' ')
-    .replace(/<\/?p[^>]*>/gi, '')
-    .trim();
 
-  return html;
+//####################################
+// ####### UTILITY FUNCTIONS #########
+//####################################
+
+
+function cleanPlusBeautifyHTML(HTML) {
+  // 1. Remove unwanted attributes
+  const rawHTML = HTML
+  const cleaned = rawHTML
+    .replace(/\sdata-[\w-]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?/gi, '')
+    .replace(/\scontenteditable(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?/gi, '');
+
+  // 2. Decode entities without DOM pollution
+  const decodeHTML = (html) => {
+    const el = document.createElement('div');
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    el.innerHTML = html;
+    const decoded = el.innerHTML;
+    el.remove();
+    return decoded;
+  };
+
+  const decoded = decodeHTML(cleaned);
+  function simpleBeautify(html) {
+    const indent = '  ';
+    let level = 0;
+    return html
+      .replace(/>\s*</g, '>\n<') // break tags onto lines
+      .split('\n')
+      .map(line => {
+        if (line.match(/^<\/\w/)) level--;
+        const padded = indent.repeat(level) + line;
+        if (line.match(/^<\w[^>]*[^/]>$/)) level++;
+        return padded;
+      })
+      .join('\n')
+      .trim();
+  }
+
+  const prettyHTML = simpleBeautify(decoded);
+  return prettyHTML
 }

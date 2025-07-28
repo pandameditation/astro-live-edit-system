@@ -8,7 +8,7 @@ app.use(express.json());
 app.use(cors());
 
 // Find the tag encompassing the position line, column in the sourceText (.astro files)
-function findTagAtPosition(sourceText, line, column) {
+function findTagAtPosition(sourceText, line, column, expectedTagName) {
   const lines = sourceText.split('\n');
   const lineIndex = line - 1;
   if (lineIndex < 0 || lineIndex >= lines.length) return null;
@@ -22,12 +22,27 @@ function findTagAtPosition(sourceText, line, column) {
   if (tagStartCol === -1) return null;
 
   // Calculate offset in entire source text of tag start
-  const globalOffset =
+  let globalOffset =
     lines
       .slice(0, lineIndex)
       .reduce((acc, l) => acc + l.length + 1, 0) + // +1 for newline
     tagStartCol;
 
+  // If expectedTagName is provided, scan backward until we find a match
+  if (expectedTagName) {
+    const openTagRegex = new RegExp(`<${expectedTagName}\\b[^>]*>`, 'gi');
+    let searchOffset = globalOffset;
+
+    while (searchOffset >= 0) {
+      const beforeText = sourceText.slice(0, searchOffset);
+      const match = [...beforeText.matchAll(openTagRegex)].pop();
+      if (match) {
+        globalOffset = match.index;
+        break;
+      }
+      searchOffset -= 1;
+    }
+  }
   // Match opening tag
   const afterStart = sourceText.slice(globalOffset);
   const openTagMatch = afterStart.match(/^<([a-zA-Z0-9_\-]+)(\s[^>]*)?>/);
@@ -39,11 +54,13 @@ function findTagAtPosition(sourceText, line, column) {
   const closeTag = `</${tagName}>`;
   const closeTagOffset = sourceText.indexOf(closeTag, openTagEndOffset);
   if (closeTagOffset === -1) return null;
-
-  return {
+  const returnObject = {
+    tagName,
     innerStart: openTagEndOffset,
     innerEnd: closeTagOffset,
   };
+  console.log(tagName);
+  return returnObject;
 }
 
 // Replace the content between innerStart and innerEnd in sourceText with newContent
@@ -60,7 +77,7 @@ app.post('/save', (req, res) => {
   // Group edits by file path
   const changesByFile = {};
 
-  for (const { file, loc, content } of edits) {
+  for (const { file, loc, content, tagName } of edits) {
     if (!loc || typeof loc !== 'string') {
       console.warn(`Skipping edit with invalid loc: ${loc}`);
       continue;
@@ -80,7 +97,7 @@ app.post('/save', (req, res) => {
 
     if (!changesByFile[relPath]) changesByFile[relPath] = [];
 
-    changesByFile[relPath].push({ start: { line, column }, content });
+    changesByFile[relPath].push({ start: { line, column }, content, tagName });
   }
 
   try {
@@ -89,6 +106,7 @@ app.post('/save', (req, res) => {
       let sourceText = fs.readFileSync(fullPath, 'utf-8');
 
       const isMarkdown = fullPath.endsWith('.md') || fullPath.endsWith('.mdx');
+      const isAstro = fullPath.endsWith('.astro')
       const lines = sourceText.split('\n');
 
       if (isMarkdown) {
@@ -107,12 +125,12 @@ app.post('/save', (req, res) => {
           });
 
         fs.writeFileSync(fullPath, lines.join('\n'), 'utf-8');
-      } else {
+      } else if (isAstro) {
         // For Astro files: find tag by start line/column and replace inner content
         changes
           .sort((a, b) => b.start.line - a.start.line)
-          .forEach(({ start, content }) => {
-            const tagRange = findTagAtPosition(sourceText, start.line, start.column);
+          .forEach(({ start, content, tagName }) => {
+            const tagRange = findTagAtPosition(sourceText, start.line, start.column, tagName);
             if (!tagRange) {
               console.warn(`Could not find tag at ${file}:${start.line}:${start.column}`);
               return;
