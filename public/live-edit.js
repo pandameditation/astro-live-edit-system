@@ -102,14 +102,24 @@ function cleanPlusBeautifyHTML(HTML) {
       .replace(/>\s*</g, '>\n<') // break tags onto lines
       .split('\n')
       .map(line => {
-        if (line.match(/^<\/\w/)) level--;
-        const padded = indent.repeat(level) + line;
-        if (line.match(/^<\w[^>]*[^/]>$/)) level++;
+        const trimmedLine = line.trim();
+
+        if (/^<\/\w/.test(trimmedLine)) {
+          level = Math.max(0, level - 1);
+        }
+
+        const padded = indent.repeat(level) + trimmedLine;
+
+        if (/^<\w[^>]*[^/>]>$/.test(trimmedLine)) {
+          level++;
+        }
+
         return padded;
       })
       .join('\n')
       .trim();
   }
+
 
   const prettyHTML = simpleBeautify(decoded);
   return prettyHTML
