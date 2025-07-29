@@ -113,11 +113,11 @@ app.post('/save', (req, res) => {
         // For Markdown: simple line-based replacement at start.line
         changes
           .sort((a, b) => b.start.line - a.start.line)
-          .forEach(({ start, content }) => {
+          .forEach(({ start }) => {
             const idx = start.line - 1;
             if (idx >= 0 && idx < lines.length) {
               const originalLine = lines[idx];
-              const cleaned = cleanHtmlToMarkdown(content);
+              const cleaned = cleanHtmlToMarkdown(lines);
               lines[idx] = preserveMarkdownPrefix(originalLine, cleaned);
             } else {
               console.warn(`[MD] Invalid line index ${idx} for file ${file}`);
