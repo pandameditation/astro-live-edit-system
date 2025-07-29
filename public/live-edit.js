@@ -80,7 +80,7 @@ function cleanPlusBeautifyHTML(HTML) {
   // 1. Remove unwanted attributes
   const rawHTML = HTML
   const cleaned = rawHTML
-    .replace(/\sdata-[\w-]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?/gi, '')
+    .replace(/\sdata-source-[\w-]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?/gi, '')
     .replace(/\scontenteditable(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?/gi, '');
 
   // 2. Decode entities without DOM pollution
@@ -94,7 +94,14 @@ function cleanPlusBeautifyHTML(HTML) {
     return decoded;
   };
 
-  const decoded = decodeHTML(cleaned);
+  let decoded = decodeHTML(cleaned);
+
+  // 3. Transform <div>text</div> into <br/>text
+  decoded = decoded.replace(/<div>(.*?)<\/div>/gis, (_, inner) => {
+    return `<br/>${inner.trim()}`;
+  });
+
+
   function simpleBeautify(html) {
     const indent = '  ';
     let level = 0;

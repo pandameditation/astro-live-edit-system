@@ -3,7 +3,6 @@ import fs from 'fs';
 import path from 'path';
 import cors from 'cors';
 import TurndownService from 'turndown';
-const turndown = new TurndownService();
 
 const app = express();
 app.use(express.json());
@@ -79,7 +78,7 @@ app.post('/save', (req, res) => {
   // Group edits by file path
   const changesByFile = {};
 
-  for (const { file, loc, content, tagName } of edits) {
+  for (const { file, loc, content, tagName, outerContent } of edits) {
     if (!loc || typeof loc !== 'string') {
       console.warn(`Skipping edit with invalid loc: ${loc}`);
       continue;
@@ -99,7 +98,7 @@ app.post('/save', (req, res) => {
 
     if (!changesByFile[relPath]) changesByFile[relPath] = [];
 
-    changesByFile[relPath].push({ start: { line, column }, content, tagName });
+    changesByFile[relPath].push({ start: { line, column }, content, tagName, outerContent });
   }
 
   try {
@@ -112,18 +111,31 @@ app.post('/save', (req, res) => {
       const lines = sourceText.split('\n');
 
       if (isMarkdown) {
-        // For Markdown: simple line-based replacement at start.line
         changes
           .sort((a, b) => b.start.line - a.start.line)
-          .forEach(({ start, content }) => {
+          .forEach(({ start, content, tagName }) => {
             const idx = start.line - 1;
-            if (idx >= 0 && idx < lines.length) {
-              const markdown = turndown.turndown(content);
-              lines[idx] = preserveMarkdownPrefix(lines[idx], markdown);
-            } else {
+            if (idx < 0 || idx >= lines.length) {
               console.warn(`[MD] Invalid line index ${idx} for file ${file}`);
+              return;
+            }
+
+            const wrapped = `<${tagName}>${content}</${tagName}>`;
+            const markdown = turndownWithListContext(wrapped);
+            const newLines = markdown.split('\n');
+
+            const isHeading = /^h[1-6]$/i.test(tagName);
+
+            if (isHeading) {
+              // Only replace the line of the heading
+              lines.splice(idx, 1, ...newLines);
+            } else {
+              // Replace entire block (until blank line)
+              const { start: blockStart, end: blockEnd } = findMarkdownBlock(lines, idx);
+              lines.splice(blockStart, blockEnd - blockStart + 1, ...newLines);
             }
           });
+
 
         fs.writeFileSync(fullPath, lines.join('\n'), 'utf-8');
       } else if (isAstro) {
@@ -169,6 +181,7 @@ function preserveMarkdownPrefix(originalLine, newContent) {
   // No markdown prefix found, just replace whole line
   return newContent;
 }
+
 
 function cleanHtmlToMarkdown(html) {
   if (typeof html !== 'string') return html;
@@ -218,4 +231,61 @@ function findMatchingCloseTag(sourceText, startOffset, tagName) {
   }
 
   return -1; // Not found
+}
+
+function turndownWithListContext(html, parentTag) {
+  const turndown = new TurndownService({
+    headingStyle: 'atx',         // Use `## Heading` style
+    bulletListMarker: '-',       // Use dash for bullet lists
+    codeBlockStyle: 'fenced',    // Use triple-backtick code blocks
+    emDelimiter: '*',            // Use `*italic*`
+    strongDelimiter: '**',       // Use `**bold**`
+    hr: '---',                   // Horizontal rule style
+    br: '  \n',                  // Line break: double space + newline
+  });
+
+  turndown.addRule('liWithContext', {
+    filter: 'li',
+    replacement: function (content, node) {
+      const siblings = Array.from(node.parentNode?.children || []);
+      const index = siblings.indexOf(node);
+      const isOrdered = parentTag === 'ol';
+      const bullet = isOrdered ? `${index + 1}. ` : '- ';
+      return `${bullet}${content.trim()}\n`;
+    }
+  });
+
+  turndown.addRule('smartBrHandling', {
+    filter: 'br',
+    replacement: function (content, node, options) {
+      const prev = node.previousSibling;
+      const next = node.nextSibling;
+
+      const prevIsText = prev && prev.nodeType === 3 && prev.textContent.trim().length > 0;
+      const nextIsText = next && next.nodeType === 3 && next.textContent.trim().length > 0;
+
+      if (prevIsText || nextIsText) {
+        // Inline <br/>
+        return '<br/>';
+      } else {
+        // Block-level break (e.g. <div><br/></div>)
+        return '\n\n';
+      }
+    }
+  });
+
+
+  return turndown.turndown(html);
+}
+
+function findMarkdownBlock(lines, startIndex) {
+  const start = startIndex;
+  let end = startIndex;
+
+  for (let i = startIndex + 1; i < lines.length; i++) {
+    if (lines[i].trim() === '') break;
+    end = i;
+  }
+
+  return { start, end };
 }
