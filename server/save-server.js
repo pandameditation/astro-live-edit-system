@@ -2,6 +2,8 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import cors from 'cors';
+import TurndownService from 'turndown';
+const turndown = new TurndownService();
 
 const app = express();
 app.use(express.json());
@@ -113,12 +115,11 @@ app.post('/save', (req, res) => {
         // For Markdown: simple line-based replacement at start.line
         changes
           .sort((a, b) => b.start.line - a.start.line)
-          .forEach(({ start }) => {
+          .forEach(({ start, content }) => {
             const idx = start.line - 1;
             if (idx >= 0 && idx < lines.length) {
-              const originalLine = lines[idx];
-              const cleaned = cleanHtmlToMarkdown(lines);
-              lines[idx] = preserveMarkdownPrefix(originalLine, cleaned);
+              const markdown = turndown.turndown(content);
+              lines[idx] = preserveMarkdownPrefix(lines[idx], markdown);
             } else {
               console.warn(`[MD] Invalid line index ${idx} for file ${file}`);
             }
