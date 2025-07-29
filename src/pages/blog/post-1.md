@@ -1,9 +1,7 @@
 ---
 layout: ../../layouts/BaseLayout.astro
 ---
-Si vous cherchiez des ressources pratiques pour adoper une méthode d’éducation non-violente pour vos enfants, Chasseur, Cueilleur, Parent va vous étonner et vous faire du bien 
-l
-l
+Si vous cherchiez des ressources pratiques pour adoper une méthode d’éducation non-violente pour vos enfants, Chasseur, Cueilleur, Parent va vous étonner et vous faire du bien
 
 Michaeleen Doucleff avait de nombreux problèmes avec sa petite fille Rosy de 3 ans, qui la frappait, ne participait pas aux tâches, faisait des scandales à plusieurs moments de la journée dont l’heure du coucher, et j’en passe.
 
