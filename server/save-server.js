@@ -111,33 +111,34 @@ app.post('/save', (req, res) => {
       const lines = sourceText.split('\n');
 
       if (isMarkdown) {
+        const { frontmatter, body, offset } = extractFrontmatter(lines);
         changes
           .sort((a, b) => b.start.line - a.start.line)
           .forEach(({ start, content, tagName }) => {
-            const idx = start.line - 1;
-            if (idx < 0 || idx >= lines.length) {
+            const idx = start.line - 1 - offset;
+            if (idx < 0 || idx >= body.length) {
               console.warn(`[MD] Invalid line index ${idx} for file ${file}`);
               return;
             }
 
             const wrapped = `<${tagName}>${content}</${tagName}>`;
-            const markdown = turndownWithListContext(wrapped);
+            const markdown = turndownWithListContext(wrapped, tagName);
             const newLines = markdown.split('\n');
 
             const isHeading = /^h[1-6]$/i.test(tagName);
 
             if (isHeading) {
               // Only replace the line of the heading
-              lines.splice(idx, 1, ...newLines);
+              body.splice(idx, 1, ...newLines);
             } else {
-              // Replace entire block (until blank line)
-              const { start: blockStart, end: blockEnd } = findMarkdownBlock(lines, idx);
-              lines.splice(blockStart, blockEnd - blockStart + 1, ...newLines);
+              // Replace entire block (until blank line or block stop)
+              const { start: blockStart, end: blockEnd } = findMarkdownBlock(body, idx);
+              body.splice(blockStart, blockEnd - blockStart + 1, ...newLines);
             }
           });
-
-
-        fs.writeFileSync(fullPath, lines.join('\n'), 'utf-8');
+        console.log(frontmatter)
+        const finalOutput = [...frontmatter, ...body].join('\n');
+        fs.writeFileSync(fullPath, finalOutput, 'utf-8');
       } else if (isAstro) {
         // For Astro files: find tag by start line/column and replace inner content
         changes
@@ -244,16 +245,63 @@ function turndownWithListContext(html, parentTag) {
     br: '  \n',                  // Line break: double space + newline
   });
 
-  turndown.addRule('liWithContext', {
-    filter: 'li',
-    replacement: function (content, node) {
-      const siblings = Array.from(node.parentNode?.children || []);
-      const index = siblings.indexOf(node);
-      const isOrdered = parentTag === 'ol';
-      const bullet = isOrdered ? `${index + 1}. ` : '- ';
-      return `${bullet}${content.trim()}\n`;
+  // Disable default list handling for nesting support
+  turndown.remove('list');
+  turndown.remove('listItem');
+
+  // Custom rendering for <ul> and <ol>
+  turndown.addRule('customList', {
+    filter: ['ul', 'ol'],
+    replacement: function (_content, node) {
+      return renderList(node, 0);
     }
   });
+
+
+  // Recursive rendering of lists with depth
+  function renderList(node, depth) {
+    const isOrdered = node.nodeName.toLowerCase() === 'ol';
+    const items = Array.from(node.children).filter(c => c.nodeName.toLowerCase() === 'li');
+
+    return items
+      .map((li, i) => {
+        const bullet = isOrdered ? `${i + 1}. ` : '- ';
+        const indent = '    '.repeat(depth);
+
+        const chunks = [];
+        let hasNonListContent = false;
+
+        for (const child of li.childNodes) {
+          const tag = child.nodeName.toLowerCase();
+
+          if (tag === 'ul' || tag === 'ol') {
+            // Recursive nested list
+            const nested = renderList(child, depth + 1);
+            if (nested.trim()) {
+              chunks.push('\n' + nested);
+            }
+          } else {
+            const rendered = turndown.turndown(child.outerHTML || child.textContent || '');
+            if (rendered.trim()) {
+              hasNonListContent = true;
+              chunks.push(rendered.trim());
+            }
+          }
+        }
+
+        if (!hasNonListContent && chunks.length === 0) {
+          // ❌ skip empty <li> (no text content and no nested list)
+          return '';
+        }
+
+        const body = chunks.join('').trim();
+        return `${indent}${bullet}${body}`;
+      })
+      .filter(Boolean) // Remove empty strings
+      .join('\n');
+  }
+
+
 
   turndown.addRule('smartBrHandling', {
     filter: 'br',
@@ -279,13 +327,84 @@ function turndownWithListContext(html, parentTag) {
 }
 
 function findMarkdownBlock(lines, startIndex) {
-  const start = startIndex;
+  const isBlank = line => line.trim() === '';
+  const isListItem = line => /^(\s*)([-+*]|\d+\.)\s+/.test(line);
+  const isHeading = line => /^#{1,6}\s+/.test(line);
+  const isCodeFence = line => /^```/.test(line);
+  const isIndentedCode = line => /^ {4,}\S/.test(line);
+  const isBlockquote = line => /^\s*>/.test(line);
+  const isHtmlTag = line => /^\s*<[^ >]+.*?>/.test(line); // naive HTML/JSX block start
+  const isMDXComponent = line => /^\s*<[A-Z][A-Za-z0-9]*\b/.test(line); // <Component>
+
+  const currentLine = lines[startIndex];
+
+  // Detect block type
+  let blockType = 'paragraph';
+
+  if (isListItem(currentLine)) blockType = 'list';
+  else if (isHeading(currentLine)) blockType = 'heading';
+  else if (isCodeFence(currentLine)) blockType = 'codeFence';
+  else if (isIndentedCode(currentLine)) blockType = 'codeIndent';
+  else if (isBlockquote(currentLine)) blockType = 'blockquote';
+  else if (isMDXComponent(currentLine)) blockType = 'mdx';
+  else if (isHtmlTag(currentLine)) blockType = 'html';
+
+  let start = startIndex;
   let end = startIndex;
 
+  // Helper to check if a line belongs to the same block
+  function belongsToBlock(line) {
+    if (isBlank(line)) return false;
+
+    switch (blockType) {
+      case 'list': return isListItem(line);
+      case 'heading': return false; // headings are single-line
+      case 'codeFence': return !isCodeFence(line);
+      case 'codeIndent': return isIndentedCode(line);
+      case 'blockquote': return isBlockquote(line);
+      case 'html': return isHtmlTag(line) || !isBlank(line);
+      case 'mdx': return isMDXComponent(line) || !isBlank(line);
+      case 'paragraph':
+      default:
+        return (
+          !isListItem(line) &&
+          !isHeading(line) &&
+          !isCodeFence(line) &&
+          !isIndentedCode(line) &&
+          !isBlockquote(line) &&
+          !isMDXComponent(line) &&
+          !isHtmlTag(line)
+        );
+    }
+  }
+
+  // Go backward
+  for (let i = startIndex - 1; i >= 0; i--) {
+    if (!belongsToBlock(lines[i])) break;
+    start = i;
+  }
+
+  // Go forward
   for (let i = startIndex + 1; i < lines.length; i++) {
-    if (lines[i].trim() === '') break;
+    if (!belongsToBlock(lines[i])) break;
     end = i;
   }
 
-  return { start, end };
+  return { start, end, blockType };
 }
+
+function extractFrontmatter(lines) {
+  if (lines[0].trim() === '---') {
+    const endIndex = lines.slice(1).findIndex(line => line.trim() === '---');
+    if (endIndex !== -1) {
+      const frontmatterEnd = endIndex + 1;
+      return {
+        frontmatter: lines.slice(0, frontmatterEnd + 1),
+        body: lines.slice(frontmatterEnd + 1),
+        offset: frontmatterEnd + 1
+      };
+    }
+  }
+  return { frontmatter: [], body: lines, offset: 0 };
+}
+
