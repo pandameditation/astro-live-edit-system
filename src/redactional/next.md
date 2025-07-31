@@ -1,5 +1,27 @@
 
-TODO 01:
+
+TODO 02:
+I want to remove all empty tags like <ul style="list-style-type: '✅ ' "></ul> that could pollute my DOM. Ideally I would remove these from the browser directly not to pass them on the server.
+
+
+
+
+---
+
+
+
+DONE 01: 
+
+Right now it removes the code fences in markdown files on saving: 
+```
+---
+layout: ../../layouts/BaseLayout.astro
+---
+```
+got entirely stripped out. How can I make sure the fences stay intact?
+
+
+DONE 02:
 When I save .md files, all tabs indentation is gone. This is bad for indented lists which are flattened. How can I fix that ?
 e.g.: ```
 - This is it
@@ -20,11 +42,7 @@ becomes
 when I added the `df` line
 
 
-TODO 02:
-I want to remove all empty tags like <ul style="list-style-type: '✅ ' "></ul> that could pollute my DOM. Ideally I would remove these from the browser directly not to pass them on the server.
-
-
-TODO 03:
+DONE 03:
 something like `<div>pouet</div>` does not save on the proper line.
 In my example I have : 
 ```
@@ -34,21 +52,8 @@ In my example I have :
   ```
   when I modify the second `pouet` to be `pouetre`, I save, the first pouet becomes `pouetre` but the second one is untouched. It seems to be a problem in the tag detection. I don't understand why it thinks this is the first block? The position of `loc` sends to the correct position of the `p` of the second `pouet` in the source file.
 
----
 
-DONE 01: 
-
-Right now it removes the code fences in markdown files on saving: 
-```
----
-layout: ../../layouts/BaseLayout.astro
----
-```
-got entirely stripped out. How can I make sure the fences stay intact?
-
-
-
-DONE:
+DONE04:
 
 When having this :
 ```
@@ -68,7 +73,7 @@ And adding `pouet` to the second bullet in the browser, it transformed the list 
 It should not create this empty row between the list items... for reference the content sent from browser: `"content": "<li>This is it</li>\n<li>pouet</li>\n<li>\n</li>\n<li>again</li>"`
 
 ---
-DONE : 
+DONE05 : 
 Make sure that markdown works properly. 
 When rendering 
 ```
@@ -85,8 +90,8 @@ we want a  more robust handling of the different markdown with `findMarkdownBloc
 
 ---
 TODO : 
-- Better handling of .md edge case scenarii
-- Edit the source file of .md directly in the browser (query the source file from server, edit in in the browser in a proper editor, send the full file to the server).
+- ~~Better handling of .md edge case scenarii~~
+- ~~Edit the source file of .md directly in the browser (query the source file from server, edit in in the browser in a proper editor, send the full file to the server).~~
 - Version history of latest changes in the source code : before writing to file, we save the current version of the file with a version number. The new version is then saved in the source file. The old version is saved in a specific file that contains all version history. The browser can query this file and get different versions. They can choose one version and replace the code with it.
 - Automatic testing of the editor with many scenarii prepared
 - Hot module reload, or page reload after saving and changes happen in source.

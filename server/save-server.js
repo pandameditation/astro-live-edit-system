@@ -8,60 +8,62 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Find the tag encompassing the position line, column in the sourceText (.astro files)
+// List of HTML void elements that are self-closing by nature
+const VOID_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'source', 'track', 'wbr'
+]);
+
+// Finds the tag that wraps the given (line, column) position in sourceText
 function findTagAtPosition(sourceText, line, column, expectedTagName) {
   const lines = sourceText.split('\n');
   const lineIndex = line - 1;
   if (lineIndex < 0 || lineIndex >= lines.length) return null;
 
-  const lineText = lines[lineIndex];
-  const searchStart = Math.max(0, column - 1);
-  const beforeCursor = lineText.slice(0, searchStart);
+  const tagName = expectedTagName?.toLowerCase();
+  const offset = lines
+    .slice(0, lineIndex)
+    .reduce((acc, l) => acc + l.length + 1, 0) + (column - 1);
 
-  // Find last '<' before the column on this line (start of tag)
-  const tagStartCol = beforeCursor.lastIndexOf('<');
-  if (tagStartCol === -1) return null;
+  const tagRegex = new RegExp(`<${tagName}\\b[^>]*?>`, 'gi');
+  tagRegex.lastIndex = 0;
 
-  // Calculate offset in entire source text of tag start
-  let globalOffset =
-    lines
-      .slice(0, lineIndex)
-      .reduce((acc, l) => acc + l.length + 1, 0) + // +1 for newline
-    tagStartCol;
+  let match;
 
-  // If expectedTagName is provided, scan backward until we find a match
-  if (expectedTagName) {
-    const openTagRegex = new RegExp(`<${expectedTagName}\\b[^>]*>`, 'gi');
-    let searchOffset = globalOffset;
+  // Scan through all opening tags matching expectedTagName
+  while ((match = tagRegex.exec(sourceText)) !== null) {
+    const openTagStart = match.index;
+    const openTagEnd = tagRegex.lastIndex;
 
-    while (searchOffset >= 0) {
-      const beforeText = sourceText.slice(0, searchOffset);
-      const match = [...beforeText.matchAll(openTagRegex)].pop();
-      if (match) {
-        globalOffset = match.index;
-        break;
+    const isSelfClosing = VOID_ELEMENTS.has(tagName) || match[0].endsWith('/>');
+
+    if (isSelfClosing) {
+      // If the tag is self-closing, check if the cursor falls inside its bounds
+      if (offset >= openTagStart && offset <= openTagEnd) {
+        return {
+          tagName,
+          innerStart: openTagStart,
+          innerEnd: openTagEnd,
+          selfClosing: true
+        };
       }
-      searchOffset -= 1;
+    } else {
+      // Find the matching close tag for non-void elements
+      const closeTagOffset = findMatchingCloseTag(sourceText, openTagEnd, tagName);
+      if (closeTagOffset === -1) continue;
+
+      // Check if the cursor offset is inside the opening/closing tag range
+      if (offset >= openTagEnd && offset < closeTagOffset) {
+        return {
+          tagName,
+          innerStart: openTagEnd,
+          innerEnd: closeTagOffset
+        };
+      }
     }
   }
-  // Match opening tag
-  const afterStart = sourceText.slice(globalOffset);
-  const openTagMatch = afterStart.match(/^<([a-zA-Z0-9_\-]+)(\s[^>]*)?>/);
-  if (!openTagMatch) return null;
 
-  const tagName = openTagMatch[1];
-  const openTagLength = openTagMatch[0].length;
-  const openTagEndOffset = globalOffset + openTagLength;
-  const closeTag = `</${tagName}>`;
-  const closeTagOffset = findMatchingCloseTag(sourceText, openTagEndOffset, tagName);
-  if (closeTagOffset === -1) return null;
-  const returnObject = {
-    tagName,
-    innerStart: openTagEndOffset,
-    innerEnd: closeTagOffset,
-  };
-  console.log(returnObject);
-  return returnObject;
+  return null; // No tag found containing the position
 }
 
 // Replace the content between innerStart and innerEnd in sourceText with newContent

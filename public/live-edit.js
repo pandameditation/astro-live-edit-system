@@ -5,16 +5,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.querySelectorAll(editableTags).forEach(el => {
     el.contentEditable = true;
-    lastSavedContent.set(el, el.innerText);
+    lastSavedContent.set(el, el.innerHTML);
 
 
     el.addEventListener('blur', () => {
       //Check that it has changed since last time
       const last = lastSavedContent.get(el);
-      if (last === el.innerText) {
-        return;
+      if (last === el.innerHTML) {
+        return; //current innerHTML is same as last. No change detected
       }
-      lastSavedContent.set(el, el.innerText);
+      lastSavedContent.set(el, el.innerHTML);
 
       // If there are changes, Save and send them to server
       const file = el.getAttribute('data-source-file');
