@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
   const lastSavedContent = new WeakMap();
-  const editableTags = 'br, p, ul, ol, div, blockquote, h1, h2, h3, h4, h5, h6';
+  const editableTags = 'p, span, ul, ol, div, blockquote, h1, h2, h3, h4, h5, h6';
   const changes = [];
   markIndentableLists();
 
@@ -70,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.body.appendChild(saveBtn);
 });
 
-//For indentable lists
+//For indentable lists TAB key
 document.addEventListener('keydown', function (e) {
   if (e.key !== 'Tab') return;
 
@@ -92,33 +92,148 @@ document.addEventListener('keydown', function (e) {
     // ➤ INDENT
     const prevLi = li.previousElementSibling;
     if (prevLi) {
+      // Find the first nested list only
+      const firstNestedList = li.querySelector('ul, ol');
+      let remainingElements = [];
+
+      if (firstNestedList) {
+        // Collect ALL remaining elements after the first nested list
+        let currentElement = firstNestedList.nextSibling;
+        while (currentElement) {
+          const nextElement = currentElement.nextSibling;
+          if (currentElement.nodeType === 1) { // Element node
+            remainingElements.push(currentElement);
+          }
+          currentElement = nextElement;
+        }
+
+        // Remove remaining elements from the current li (we'll put them back later)
+        remainingElements.forEach(element => element.remove());
+      }
+
       let sublist = prevLi.querySelector('ul, ol');
       if (!sublist) {
-        sublist = document.createElement(prevLi.parentElement.tagName.toLowerCase()); // Keep same list type
+        sublist = document.createElement(prevLi.parentElement.tagName.toLowerCase());
         prevLi.appendChild(sublist);
       }
+
+      // Move the current li to the sublist (with its first nested list intact)
       sublist.appendChild(li);
+
+      // Put remaining elements at the SAME LEVEL as the newly indented item
+      // (i.e., as siblings in the same sublist, not at the original parent level)
+      if (remainingElements.length > 0) {
+        remainingElements.forEach(element => {
+          if (element.tagName === 'UL' || element.tagName === 'OL') {
+            // This is a nested list - convert its children to list items at the current sublist level
+            const listChildren = Array.from(element.children);
+            listChildren.forEach(child => {
+              sublist.appendChild(child); // Add to the same sublist as the indented item
+            });
+          } else if (element.tagName === 'LI') {
+            // This is already a list item - add it to the same sublist
+            sublist.appendChild(element);
+          }
+        });
+      }
     }
   } else {
-    // ➤ OUTDENT
+    // ➤ OUTDENT (unchanged)
     const currentList = li.parentElement;
     const parentLi = currentList.closest('li');
 
-    // Only outdent if we are in a nested list
     if (parentLi && parentLi.parentElement) {
-      parentLi.parentElement.insertBefore(li, parentLi.nextSibling);
+      const grandList = parentLi.parentElement;
 
-      // Remove empty list if needed
+      const remainingSiblings = [];
+      let nextSibling = li.nextElementSibling;
+      while (nextSibling) {
+        const temp = nextSibling.nextElementSibling;
+        remainingSiblings.push(nextSibling);
+        nextSibling = temp;
+      }
+
+      grandList.insertBefore(li, parentLi.nextSibling);
+
+      if (remainingSiblings.length > 0) {
+        const newSublist = document.createElement(currentList.tagName.toLowerCase());
+        remainingSiblings.forEach(sibling => {
+          newSublist.appendChild(sibling);
+        });
+        li.appendChild(newSublist);
+      }
+
       if (currentList.children.length === 0) {
         currentList.remove();
       }
-    } else {
-      // Top-level: do nothing
-      return;
     }
   }
 
   restoreCaretToOffset(li, caretOffset);
+});
+
+//Better behavior for handling backspace on a list from the browser
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Backspace') return;
+
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+
+  const range = sel.getRangeAt(0);
+  const container = range.startContainer.nodeType === 1
+    ? range.startContainer
+    : range.startContainer.parentElement;
+  const li = container.closest('li');
+
+  if (!li || !li.closest('.data-indentable')) return;
+
+  // Check if cursor is at the very beginning of the list item content
+  const caretOffset = getCaretCharacterOffsetWithin(li);
+  if (caretOffset !== 0) return; // Not at the beginning, let normal backspace work
+
+  e.preventDefault();
+
+  // When backspacing at the beginning, we always want to merge with previous item
+  // Check if this li has nested children that need to be preserved
+  const nestedList = li.querySelector('ul, ol');
+  let prevLi = li.previousElementSibling;
+
+  // If no direct sibling, find the parent li to merge with
+  if (!prevLi) {
+    const currentList = li.parentElement;
+    const parentLi = currentList.closest('li');
+    if (parentLi) {
+      prevLi = parentLi;
+    }
+  }
+
+  if (prevLi) {
+    // Get the content of the current li
+    const currentContent = li.childNodes[0]?.textContent || '';
+    const prevContentLength = prevLi.textContent.length;
+
+    // Merge content with previous li
+    if (currentContent) {
+      const lastNode = prevLi.lastChild;
+      if (lastNode && lastNode.nodeType === 3) {
+        lastNode.textContent += currentContent;
+      } else {
+        prevLi.appendChild(document.createTextNode(currentContent));
+      }
+    }
+
+    // If there were nested children, move them to after the merged item
+    if (nestedList) {
+      const parentList = prevLi.parentElement;
+      parentList.insertBefore(nestedList, prevLi.nextSibling);
+    }
+
+    // Remove the current li
+    li.remove();
+
+    // Set cursor at merge point
+    restoreCaretToOffset(prevLi, prevContentLength);
+  }
 });
 
 
