@@ -1,8 +1,6 @@
-BUG: 
-Focus sur le debut de l'avant-derniere ligne, presse backspace... tout pète. `Cannot read properties of null (reading 'closest')`  at line `const li = container.closest('li');`
+TODO 01 : Fix the case where I add `style="list-style-type: '✅ ' "` to a list and it is not saved because of innerHTML vs. outerHTML...
+This will allow to insert any element in the DOM from the inspector
 
-BUG 2: 
-When pressing backspace in a list and full text is selected, it should delete all text but instead it moves the text above and merge is hoisted by the previous list element.
 
 TODO 02:
 I want to remove all empty tags like <ul style="list-style-type: '✅ ' "></ul> that could pollute my DOM. Ideally I would remove these from the browser directly not to pass them on the server.
@@ -11,7 +9,7 @@ I want to remove all empty tags like <ul style="list-style-type: '✅ ' "></ul> 
 
 TODO : 
 - Improving list nesting (correcting editing errors)
-- Fix the case where I add `style="list-style-type: '✅ ' "` to a list and it is not saved because of innerHTML vs. outerHTML...
+
 - Adding a menu next to each block (like Notion) and ability to delete a block
 - Create an "Edit mode" button switch.
 - Get the original source from the server and toll back to it with a undo button (version history)
@@ -25,7 +23,20 @@ TODO :
 - Adding new blocks in the browser, managing a library of blocks. New blocks are appended to the source file on save.
 ---
 
+BUG FIXES in LISTs: 
+BUG 1: 
 
+When the caret is before the first character of the row, on any nested list item, pressing backspace will break the caret position and focus moves out of the list. 
+Expected behavior: after pressing backspace, the caret position is still before the first character of the row, the row is removed and merged with the preceding row. This behavior of merging works fine on list items which are not nested, but becomes erratic in case of nesting.
+
+BUG 2: 
+When pressing backspace in a list and full text is selected, it should delete all text but instead it moves the text above and merge is hoisted by the previous list element.
+
+BUG 3: focus trap
+If the focus is on the first line of a list, allow tab to move out of focus
+
+BUG 4: 
+On an empty list line, pressing tab once to indent it, the focus goes away from the list
 
 DONE 01: 
 
